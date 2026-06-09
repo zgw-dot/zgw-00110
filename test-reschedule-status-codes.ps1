@@ -123,6 +123,32 @@ function Find-AvailableSlot($venueId, $headers, $startDays = 60, $timeSlots = @(
     exit 1
 }
 
+# 带重试机制的预约创建，避免与历史数据冲突
+function New-BookingWithRetry($venueId, $headers, $purpose, $startDays, $maxRetries = 3) {
+    $timeSlots = @("08:00-10:00", "10:00-12:00", "14:00-16:00", "16:00-18:00", "19:00-21:00")
+    $searchStart = $startDays
+    for ($retry = 0; $retry -lt $maxRetries; $retry++) {
+        $slot = Find-AvailableSlot $venueId $headers $searchStart $timeSlots
+        $date, $start, $end = $slot
+        Write-Host "  尝试时段: $date $start-$end (尝试 $($retry+1)/$maxRetries)" -ForegroundColor Gray
+        $body = @{
+            venueId = $venueId
+            date = $date
+            startTime = $start
+            endTime = $end
+            purpose = $purpose
+        } | ConvertTo-Json
+        $result = Test-Success "创建预约" { Invoke-Api "POST" "/bookings" $headers $body }
+        if ($result[0]) {
+            return @($result[1], $date, $start, $end)
+        }
+        Write-Host "  时段已被占用，尝试下一个..." -ForegroundColor Yellow
+        $searchStart += 7
+    }
+    Write-Host "  错误: 多次尝试仍无法创建预约" -ForegroundColor Red
+    exit 1
+}
+
 # ==================== 初始化 ====================
 Write-Host "--- 初始化 ---" -ForegroundColor Cyan
 
@@ -143,41 +169,27 @@ Write-Host "  使用场地: $($venue.name) (ID: $($venue.id.Substring(0,8))...)"
 Write-Host ""
 Write-Host "--- 查找可用时段 ---" -ForegroundColor Cyan
 
-$startOffset = 100 + ([int]$runId.Substring(10, 4) % 50)
+$startOffset = 150 + ([int]$runId.Substring(10, 4) % 100)
 Write-Host "  日期偏移: +$startOffset 天" -ForegroundColor Gray
-
-$slot1 = Find-AvailableSlot $venue.id $zhangsanHeaders $startOffset
-$date1, $start1, $end1 = $slot1
-Write-Host "  时段1: $date1 $start1-$end1" -ForegroundColor Gray
-
-$slot2 = Find-AvailableSlot $venue.id $zhangsanHeaders ($startOffset + 5)
-$date2, $start2, $end2 = $slot2
-Write-Host "  时段2: $date2 $start2-$end2" -ForegroundColor Gray
-
-$slot3 = Find-AvailableSlot $venue.id $zhangsanHeaders ($startOffset + 10)
-$date3, $start3, $end3 = $slot3
-Write-Host "  时段3: $date3 $start3-$end3" -ForegroundColor Gray
 
 # ==================== 场景1: 本人正常改期 (200) ====================
 Write-Host ""
 Write-Host "--- 测试场景 ---" -ForegroundColor Cyan
 
-$r = Test-Success "创建预约1 (zhangsan)" {
-    $body = @{
-        venueId = $venue.id
-        date = $date1
-        startTime = $start1
-        endTime = $end1
-        purpose = "$testPurposePrefix-正常改期"
-    } | ConvertTo-Json
-    Invoke-Api "POST" "/bookings" $zhangsanHeaders $body
-}
-$booking1 = Assert-Success "创建预约1" $r
+# 带重试创建预约1，避免与历史数据冲突
+$b1Result = New-BookingWithRetry $venue.id $zhangsanHeaders "$testPurposePrefix-正常改期" $startOffset
+$booking1, $date1, $start1, $end1 = $b1Result
+Write-Host "  预约1时段: $date1 $start1-$end1" -ForegroundColor Gray
 
 $r = Test-Success "审批预约1" {
     Invoke-Api "POST" "/bookings/$($booking1.id)/approve" $adminHeaders
 }
 $null = Assert-Success "审批预约1" $r
+
+# 动态查找改期目标日期
+$slot2 = Find-AvailableSlot $venue.id $zhangsanHeaders ($startOffset + 30)
+$date2, $start2, $end2 = $slot2
+Write-Host "  改期目标: $date2 $start2-$end2" -ForegroundColor Gray
 
 $scenario1 = Test-Success "1. 本人正常改期 (期望 200)" {
     $body = @{
@@ -197,17 +209,10 @@ $r = Test-Success "管理员同意改期1" {
 $null = Assert-Success "管理员同意改期1" $r
 
 # ==================== 场景2: 越权改期 (403) ====================
-$r = Test-Success "创建预约2 (zhangsan)" {
-    $body = @{
-        venueId = $venue.id
-        date = $date3
-        startTime = $start3
-        endTime = $end3
-        purpose = "$testPurposePrefix-越权改期"
-    } | ConvertTo-Json
-    Invoke-Api "POST" "/bookings" $zhangsanHeaders $body
-}
-$booking2 = Assert-Success "创建预约2" $r
+# 带重试创建预约2
+$b2Result = New-BookingWithRetry $venue.id $zhangsanHeaders "$testPurposePrefix-越权改期" ($startOffset + 60)
+$booking2, $date3, $start3, $end3 = $b2Result
+Write-Host "  预约2时段: $date3 $start3-$end3" -ForegroundColor Gray
 
 $r = Test-Success "审批预约2" {
     Invoke-Api "POST" "/bookings/$($booking2.id)/approve" $adminHeaders
@@ -236,34 +241,29 @@ $scenario3 = Test-Scenario "3. 非法时间范围 (结束早于开始) (期望 4
 }
 
 # ==================== 场景4: 时段冲突 (400) ====================
-# 动态查找可用时段创建冲突预约（在改期完成后查找，避免时段冲突）
-$slot4 = Find-AvailableSlot $venue.id $zhangsanHeaders ($startOffset + 15) @("08:00-10:00", "10:00-12:00")
-$date4, $start4, $end4 = $slot4
+# 带重试创建冲突预约，避免与历史数据冲突
+$b4Result = New-BookingWithRetry $venue.id $lisiHeaders "$testPurposePrefix-冲突" ($startOffset + 90)
+$conflictBooking, $date4, $start4, $end4 = $b4Result
 Write-Host "  冲突时段: $date4 $start4-$end4" -ForegroundColor Gray
 
-$r = Test-Success "创建冲突预约 (lisi)" {
-    $body = @{
-        venueId = $venue.id
-        date = $date4
-        startTime = $start4
-        endTime = $end4
-        purpose = "$testPurposePrefix-冲突"
-    } | ConvertTo-Json
-    Invoke-Api "POST" "/bookings" $lisiHeaders $body
-}
-$null = Assert-Success "创建冲突预约" $r
-
-# 计算一个与冲突预约重叠的时段
-$conflictStart = $start4
-$conflictEnd = $end4
-# 取中间半小时
+# 计算一个与冲突预约重叠的时段（取中间30分钟，确保重叠）
 $h1, $m1 = $start4 -split ":"
 $h2, $m2 = $end4 -split ":"
 $totalStart = [int]$h1 * 60 + [int]$m1
 $totalEnd = [int]$h2 * 60 + [int]$m2
-$mid = ($totalStart + $totalEnd) / 2
-$conflictStart = "{0:D2}:{1:D2}" -f [math]::Floor($mid / 60), [int]($mid % 60)
-$conflictEnd = "{0:D2}:{1:D2}" -f [math]::Floor(($mid + 30) / 60), [int](($mid + 30) % 60)
+$midMinutes = [int](($totalStart + $totalEnd) / 2)
+$overlapStart = $midMinutes - 15
+$overlapEnd = $midMinutes + 15
+
+# 稳定的整数格式化：用 [Math]::Truncate 确保截断，避免 PowerShell [int] 四舍五入问题
+$startHour = [Math]::Truncate($overlapStart / 60)
+$startMin = $overlapStart % 60
+$endHour = [Math]::Truncate($overlapEnd / 60)
+$endMin = $overlapEnd % 60
+$conflictStart = $startHour.ToString("00") + ":" + $startMin.ToString("00")
+$conflictEnd = $endHour.ToString("00") + ":" + $endMin.ToString("00")
+
+Write-Host "  冲突测试时段: $conflictStart-$conflictEnd (与 $start4-$end4 重叠)" -ForegroundColor Gray
 
 $scenario4 = Test-Scenario "4. 时段冲突 (改期到已占用时段) (期望 400)" 400 {
     $body = @{
@@ -297,6 +297,7 @@ if ($allPassed) {
     Write-Host "  部分测试失败 ✗" -ForegroundColor Red
     exit 1
 }
+
 Write-Host ""
 Write-Host "复跑步骤:" -ForegroundColor Cyan
 Write-Host "  1. 确保后端服务运行在 http://localhost:3001" -ForegroundColor Gray
@@ -309,3 +310,5 @@ Write-Host "  - 越权改期: 403 Forbidden" -ForegroundColor Gray
 Write-Host "  - 非法时间范围: 400 Bad Request" -ForegroundColor Gray
 Write-Host "  - 时段冲突: 400 Bad Request" -ForegroundColor Gray
 Write-Host ""
+
+exit 0
