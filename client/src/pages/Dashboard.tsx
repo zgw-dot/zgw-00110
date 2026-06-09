@@ -47,6 +47,7 @@ export default function Dashboard() {
           pendingApproval: counts.pending,
           inUse: counts.checkedIn,
           approved: counts.approved,
+          pendingReschedule: counts.pendingReschedule,
         });
 
         const actions: any[] = [];
@@ -57,6 +58,15 @@ export default function Dashboard() {
             count: counts.pending,
             description: `有 ${counts.pending} 个预约等待审批`,
             action: () => navigate('/bookings?status=pending'),
+          });
+        }
+        if (counts.pendingReschedule > 0) {
+          actions.push({
+            type: 'warning',
+            title: '待处理改期',
+            count: counts.pendingReschedule,
+            description: `有 ${counts.pendingReschedule} 个改期申请等待处理`,
+            action: () => navigate('/bookings?tab=reschedules'),
           });
         }
         if (counts.approved > 0) {

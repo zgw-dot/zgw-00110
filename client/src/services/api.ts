@@ -8,6 +8,8 @@ import {
   BookingHistory,
   LoginResponse,
   BookingStatus,
+  RescheduleRequest,
+  RescheduleStatus,
 } from '../types';
 
 const api = axios.create({
@@ -91,7 +93,7 @@ export const venueApi = {
 
 export const bookingApi = {
   getPendingCount: () =>
-    api.get<{ pending: number; approved: number; checkedIn: number }>('/bookings/pending-count').then((r) => r.data),
+    api.get<{ pending: number; approved: number; checkedIn: number; pendingReschedule: number }>('/bookings/pending-count').then((r) => r.data),
 
   getCalendarBookings: (venueId: string, startDate: string, endDate: string) =>
     api
@@ -171,6 +173,36 @@ export const bookingApi = {
         responseType: 'blob',
       })
       .then((r) => r.data),
+
+  rescheduleBooking: (bookingId: string, data: {
+    newDate: string;
+    newStartTime: string;
+    newEndTime: string;
+    reason: string;
+  }) =>
+    api.post<RescheduleRequest>(`/bookings/${bookingId}/reschedule`, data).then((r) => r.data),
+
+  getReschedules: (params?: {
+    bookingId?: string;
+    status?: RescheduleStatus;
+    userId?: string;
+    page?: number;
+    pageSize?: number;
+  }) =>
+    api
+      .get<{ requests: RescheduleRequest[]; total: number; page: number; pageSize: number }>('/bookings/reschedules', {
+        params,
+      })
+      .then((r) => r.data),
+
+  getReschedule: (id: string) =>
+    api.get<RescheduleRequest>(`/bookings/reschedules/${id}`).then((r) => r.data),
+
+  approveReschedule: (id: string) =>
+    api.post<RescheduleRequest>(`/bookings/reschedules/${id}/approve`).then((r) => r.data),
+
+  rejectReschedule: (id: string, reason: string) =>
+    api.post<RescheduleRequest>(`/bookings/reschedules/${id}/reject`, { reason }).then((r) => r.data),
 };
 
 export const transactionApi = {

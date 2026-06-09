@@ -18,16 +18,147 @@ import {
 } from '../services/bookingService';
 import { logAudit, getBookingHistory } from '../services/auditService';
 import { exportBookingsCsv } from '../services/csvService';
-import { BookingStatus } from '../types';
+import {
+  createReschedule,
+  approveReschedule,
+  rejectReschedule,
+  getRescheduleRequests,
+  getRescheduleById,
+  getPendingRescheduleCount,
+} from '../services/rescheduleService';
+import { BookingStatus, RescheduleStatus } from '../types';
 
 const router = express.Router();
 
 router.get('/pending-count', authenticate, async (_req, res) => {
   try {
     const counts = await getPendingCount();
-    res.json(counts);
+    const rescheduleCounts = await getPendingRescheduleCount();
+    res.json({ ...counts, pendingReschedule: rescheduleCounts.pending });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : '获取待处理数量失败' });
+  }
+});
+
+router.get('/reschedules', authenticate, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '未认证' });
+
+    const filters: any = {};
+    if (req.user.role === 'resident') {
+      filters.userId = req.user.userId;
+    }
+    if (req.query.bookingId) filters.bookingId = req.query.bookingId as string;
+    if (req.query.status) filters.status = req.query.status as RescheduleStatus;
+    if (req.query.page) filters.page = parseInt(req.query.page as string, 10);
+    if (req.query.pageSize) filters.pageSize = parseInt(req.query.pageSize as string, 10);
+    if (req.query.userId && req.user.role === 'admin') {
+      filters.userId = req.query.userId as string;
+    }
+
+    const result = await getRescheduleRequests(filters);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '获取改期列表失败' });
+  }
+});
+
+router.get('/reschedules/:id', authenticate, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '未认证' });
+
+    const reschedule = await getRescheduleById(req.params.id);
+    if (!reschedule) {
+      return res.status(404).json({ error: '改期申请不存在' });
+    }
+
+    if (req.user.role === 'resident' && reschedule.user_id !== req.user.userId) {
+      return res.status(403).json({ error: '无权查看此改期申请' });
+    }
+
+    res.json(reschedule);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '获取改期详情失败' });
+  }
+});
+
+router.post('/:id/reschedule', authenticate, requireRole('resident'), async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '未认证' });
+    const { newDate, newStartTime, newEndTime, reason } = req.body;
+    
+    if (!newDate || !newStartTime || !newEndTime || !reason) {
+      return res.status(400).json({ error: '缺少必要参数' });
+    }
+
+    const reschedule = await createReschedule({
+      bookingId: req.params.id,
+      newDate,
+      newStartTime,
+      newEndTime,
+      reason,
+      user: req.user,
+    });
+
+    await logAudit(
+      req.user,
+      'reschedule_request',
+      req.params.id,
+      `申请改期: ${reschedule.old_date} ${reschedule.old_start_time}-${reschedule.old_end_time} → ${reschedule.new_date} ${reschedule.new_start_time}-${reschedule.new_end_time}, 原因: ${reason}`,
+      req.ip
+    );
+
+    res.json(reschedule);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '改期申请失败' });
+  }
+});
+
+router.post('/reschedules/:id/approve', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '未认证' });
+
+    const reschedule = await approveReschedule({
+      rescheduleId: req.params.id,
+      user: req.user,
+    });
+
+    await logAudit(
+      req.user,
+      'reschedule_approve',
+      reschedule.booking_id,
+      `同意改期: ${reschedule.old_date} ${reschedule.old_start_time}-${reschedule.old_end_time} → ${reschedule.new_date} ${reschedule.new_start_time}-${reschedule.new_end_time}`,
+      req.ip
+    );
+
+    res.json(reschedule);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '同意改期失败' });
+  }
+});
+
+router.post('/reschedules/:id/reject', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '未认证' });
+    const { reason } = req.body;
+
+    const reschedule = await rejectReschedule({
+      rescheduleId: req.params.id,
+      rejectionReason: reason || '管理员拒绝',
+      user: req.user,
+    });
+
+    await logAudit(
+      req.user,
+      'reschedule_reject',
+      reschedule.booking_id,
+      `拒绝改期: ${reschedule.old_date} ${reschedule.old_start_time}-${reschedule.old_end_time} → ${reschedule.new_date} ${reschedule.new_start_time}-${reschedule.new_end_time}, 原因: ${reason || '管理员拒绝'}`,
+      req.ip
+    );
+
+    res.json(reschedule);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '拒绝改期失败' });
   }
 });
 

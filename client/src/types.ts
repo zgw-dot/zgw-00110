@@ -102,6 +102,47 @@ export interface BookingHistory {
   created_at: string;
 }
 
+export type RescheduleStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected';
+
+export interface RescheduleRequest {
+  id: string;
+  booking_id: string;
+  user_id: string;
+  old_date: string;
+  old_start_time: string;
+  old_end_time: string;
+  new_date: string;
+  new_start_time: string;
+  new_end_time: string;
+  reason: string;
+  status: RescheduleStatus;
+  handled_by: string | null;
+  handled_by_name: string | null;
+  handled_at: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  venue_name?: string;
+  venue_code?: string;
+  user_name?: string;
+  user_username?: string;
+}
+
+export const RESCHEDULE_STATUS_TEXT: Record<RescheduleStatus, string> = {
+  pending: '待处理',
+  approved: '已同意',
+  rejected: '已拒绝',
+};
+
+export const RESCHEDULE_STATUS_COLOR: Record<RescheduleStatus, string> = {
+  pending: 'orange',
+  approved: 'green',
+  rejected: 'red',
+};
+
 export interface LoginResponse {
   token: string;
   user: User;

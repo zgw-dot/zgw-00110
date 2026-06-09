@@ -186,12 +186,37 @@ export async function initDatabase() {
       FOREIGN KEY (booking_id) REFERENCES bookings(id)
     );
 
+    CREATE TABLE IF NOT EXISTS reschedule_requests (
+      id TEXT PRIMARY KEY,
+      booking_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      old_date TEXT NOT NULL,
+      old_start_time TEXT NOT NULL,
+      old_end_time TEXT NOT NULL,
+      new_date TEXT NOT NULL,
+      new_start_time TEXT NOT NULL,
+      new_end_time TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+      handled_by TEXT,
+      handled_by_name TEXT,
+      handled_at TEXT,
+      rejection_reason TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (booking_id) REFERENCES bookings(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_bookings_venue_date ON bookings(venue_id, date);
     CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id);
     CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
     CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
     CREATE INDEX IF NOT EXISTS idx_booking_histories_booking ON booking_histories(booking_id);
+    CREATE INDEX IF NOT EXISTS idx_reschedule_booking ON reschedule_requests(booking_id);
+    CREATE INDEX IF NOT EXISTS idx_reschedule_user ON reschedule_requests(user_id);
+    CREATE INDEX IF NOT EXISTS idx_reschedule_status ON reschedule_requests(status);
   `);
 }
 
