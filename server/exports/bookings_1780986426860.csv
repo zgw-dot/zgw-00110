@@ -1,0 +1,6 @@
+id,venue_code,venue_name,user_name,date,start_time,end_time,purpose,status,deposit_amount,created_at
+17d0eea6-c4f9-4e51-a982-3a42081f5b1a,REV-1780986426502,Reviewer Venue 1780986426502,张三,2026-12-31,09:00,10:00,review-main-flow,已完成,123,2026-06-09 06:27:06
+570002d4-a6a0-475f-b8f6-085ac85ba23b,RV-1780985955777,Reviewer Venue 1780985955777,张三,2026-12-24,09:00,10:00,reviewer-main-flow,已完成,88,2026-06-09 06:19:16
+34510b54-79f6-4579-95cb-12e1c7d51cf3,MULTI-001,多功能厅,李四,2026-06-10,15:00,17:00,test2,待审批,200,2026-06-09 05:08:33
+efbcb461-8bea-4340-a835-ad4dbd169c64,MULTI-001,多功能厅,李四,2026-06-10,13:00,15:00,test1,待审批,200,2026-06-09 05:08:33
+ba375654-2e21-4067-9085-cd3a364eb209,BASKET-001,篮球场,张三,2026-06-10,09:00,11:00,API Test Booking,已完成,150,2026-06-09 05:08:32

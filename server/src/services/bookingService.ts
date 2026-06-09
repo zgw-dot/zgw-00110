@@ -23,8 +23,8 @@ export async function checkTimeOverlap(
 ): Promise<boolean> {
   const excludeClause = excludeBookingId ? 'AND id != ?' : '';
   const params = excludeBookingId
-    ? [venueId, date, startTime, endTime, excludeBookingId]
-    : [venueId, date, startTime, endTime];
+    ? [venueId, date, endTime, startTime, excludeBookingId]
+    : [venueId, date, endTime, startTime];
 
   const overlapping = await db.get(`
     SELECT COUNT(*) as count FROM bookings
@@ -68,13 +68,17 @@ export async function createBooking(params: CreateBookingParams): Promise<Bookin
     throw new Error('用户不存在');
   }
 
-  if (resident.balance < venue.deposit_amount) {
-    throw new Error('余额不足，无法冻结押金');
-  }
-
   const bookingId = uuidv4();
 
   await db.runTransaction(async () => {
+    const lockedUser = await db.get('SELECT * FROM users WHERE id = ?', [userId]) as User | undefined;
+    if (!lockedUser) {
+      throw new Error('用户不存在');
+    }
+    if (lockedUser.balance < venue.deposit_amount) {
+      throw new Error('余额不足，无法冻结押金');
+    }
+
     await db.run(`
       INSERT INTO bookings (
         id, venue_id, user_id, date, start_time, end_time, purpose,
@@ -118,15 +122,20 @@ export async function approveBooking(params: ApproveBookingParams): Promise<Book
     throw new Error('预约不存在');
   }
 
-  if (!canTransition(booking.status, 'approved')) {
-    throw new Error(`无法从${booking.status}状态审批通过`);
-  }
-
-  if (await checkTimeOverlap(booking.venue_id, booking.date, booking.start_time, booking.end_time, bookingId)) {
-    throw new Error('该时段已被其他预约占用');
-  }
-
   await db.runTransaction(async () => {
+    const lockedBooking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
+    if (!lockedBooking) {
+      throw new Error('预约不存在');
+    }
+
+    if (!canTransition(lockedBooking.status, 'approved')) {
+      throw new Error(`无法从${lockedBooking.status}状态审批通过`);
+    }
+
+    if (await checkTimeOverlap(lockedBooking.venue_id, lockedBooking.date, lockedBooking.start_time, lockedBooking.end_time, bookingId)) {
+      throw new Error('该时段已被其他预约占用');
+    }
+
     await db.run(`
       UPDATE bookings
       SET status = 'approved', approved_by = ?, updated_at = CURRENT_TIMESTAMP
@@ -159,13 +168,18 @@ export async function rejectBooking(params: RejectBookingParams): Promise<Bookin
     throw new Error('预约不存在');
   }
 
-  if (!canTransition(booking.status, 'rejected')) {
-    throw new Error(`无法从${booking.status}状态拒绝`);
-  }
-
   await db.runTransaction(async () => {
-    if (booking.deposit_transaction_id) {
-      await reverseTransaction(booking.deposit_transaction_id, user.userId);
+    const lockedBooking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
+    if (!lockedBooking) {
+      throw new Error('预约不存在');
+    }
+
+    if (!canTransition(lockedBooking.status, 'rejected')) {
+      throw new Error(`无法从${lockedBooking.status}状态拒绝`);
+    }
+
+    if (lockedBooking.deposit_transaction_id) {
+      await reverseTransaction(lockedBooking.deposit_transaction_id, user.userId);
     }
 
     await db.run(`
@@ -175,7 +189,7 @@ export async function rejectBooking(params: RejectBookingParams): Promise<Bookin
       WHERE id = ?
     `, [user.userId, reason, null, bookingId]);
 
-    await addBookingHistory(bookingId, booking.status, 'rejected', user.userId, user.username, reason || '管理员拒绝');
+    await addBookingHistory(bookingId, lockedBooking.status, 'rejected', user.userId, user.username, reason || '管理员拒绝');
   });
 
   return await db.get(`
@@ -195,23 +209,23 @@ export interface CheckInParams {
 export async function checkIn(params: CheckInParams): Promise<Booking> {
   const { bookingId, user } = params;
 
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
-  if (!booking) {
-    throw new Error('预约不存在');
-  }
-
-  if (!canTransition(booking.status, 'checked_in')) {
-    throw new Error(`无法从${booking.status}状态签到`);
-  }
-
   await db.runTransaction(async () => {
+    const lockedBooking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
+    if (!lockedBooking) {
+      throw new Error('预约不存在');
+    }
+
+    if (!canTransition(lockedBooking.status, 'checked_in')) {
+      throw new Error(`无法从${lockedBooking.status}状态签到`);
+    }
+
     await db.run(`
       UPDATE bookings
       SET status = 'checked_in', checked_in_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [bookingId]);
 
-    await addBookingHistory(bookingId, booking.status, 'checked_in', user.userId, user.username, '完成签到');
+    await addBookingHistory(bookingId, lockedBooking.status, 'checked_in', user.userId, user.username, '完成签到');
   });
 
   return await db.get(`
@@ -231,22 +245,22 @@ export interface CompleteBookingParams {
 export async function completeBooking(params: CompleteBookingParams): Promise<Booking> {
   const { bookingId, user } = params;
 
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
-  if (!booking) {
-    throw new Error('预约不存在');
-  }
-
-  if (!canTransition(booking.status, 'completed')) {
-    throw new Error(`无法从${booking.status}状态完成核销`);
-  }
-
   await db.runTransaction(async () => {
-    if (booking.deposit_transaction_id) {
+    const lockedBooking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
+    if (!lockedBooking) {
+      throw new Error('预约不存在');
+    }
+
+    if (!canTransition(lockedBooking.status, 'completed')) {
+      throw new Error(`无法从${lockedBooking.status}状态完成核销`);
+    }
+
+    if (lockedBooking.deposit_transaction_id) {
       const refundTx = await createTransaction({
-        userId: booking.user_id,
+        userId: lockedBooking.user_id,
         bookingId,
         type: 'deposit_refund',
-        amount: booking.deposit_amount,
+        amount: lockedBooking.deposit_amount,
         description: '场地使用完成，退还押金',
         createdBy: user.userId,
       });
@@ -260,7 +274,7 @@ export async function completeBooking(params: CompleteBookingParams): Promise<Bo
       WHERE id = ?
     `, [bookingId]);
 
-    await addBookingHistory(bookingId, booking.status, 'completed', user.userId, user.username, '完成使用，核销押金');
+    await addBookingHistory(bookingId, lockedBooking.status, 'completed', user.userId, user.username, '完成使用，核销押金');
   });
 
   return await db.get(`
@@ -281,26 +295,26 @@ export interface CancelBookingParams {
 export async function cancelBooking(params: CancelBookingParams): Promise<Booking> {
   const { bookingId, reason, user } = params;
 
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
-  if (!booking) {
-    throw new Error('预约不存在');
-  }
-
-  if (!canTransition(booking.status, 'cancelled')) {
-    throw new Error(`无法从${booking.status}状态取消`);
-  }
-
-  if (user.role === 'resident' && booking.user_id !== user.userId) {
-    throw new Error('只能取消自己的预约');
-  }
-
   await db.runTransaction(async () => {
-    if (booking.deposit_transaction_id && booking.status !== 'completed') {
+    const lockedBooking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
+    if (!lockedBooking) {
+      throw new Error('预约不存在');
+    }
+
+    if (!canTransition(lockedBooking.status, 'cancelled')) {
+      throw new Error(`无法从${lockedBooking.status}状态取消`);
+    }
+
+    if (user.role === 'resident' && lockedBooking.user_id !== user.userId) {
+      throw new Error('只能取消自己的预约');
+    }
+
+    if (lockedBooking.deposit_transaction_id && lockedBooking.status !== 'completed') {
       const refundTx = await createTransaction({
-        userId: booking.user_id,
+        userId: lockedBooking.user_id,
         bookingId,
         type: 'deposit_refund',
-        amount: booking.deposit_amount,
+        amount: lockedBooking.deposit_amount,
         description: `取消预约，退还押金：${reason}`,
         createdBy: user.userId,
       });
@@ -314,7 +328,7 @@ export async function cancelBooking(params: CancelBookingParams): Promise<Bookin
       WHERE id = ?
     `, [bookingId]);
 
-    await addBookingHistory(bookingId, booking.status, 'cancelled', user.userId, user.username, reason || '取消预约');
+    await addBookingHistory(bookingId, lockedBooking.status, 'cancelled', user.userId, user.username, reason || '取消预约');
   });
 
   return await db.get(`
@@ -334,23 +348,34 @@ export interface MarkNoShowParams {
 export async function markNoShow(params: MarkNoShowParams): Promise<Booking> {
   const { bookingId, user } = params;
 
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
-  if (!booking) {
-    throw new Error('预约不存在');
-  }
-
-  if (!canTransition(booking.status, 'no_show')) {
-    throw new Error(`无法从${booking.status}状态标记爽约`);
-  }
-
   await db.runTransaction(async () => {
+    const lockedBooking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]) as Booking | undefined;
+    if (!lockedBooking) {
+      throw new Error('预约不存在');
+    }
+
+    if (!canTransition(lockedBooking.status, 'no_show')) {
+      throw new Error(`无法从${lockedBooking.status}状态标记爽约`);
+    }
+
+    if (lockedBooking.deposit_transaction_id) {
+      await createTransaction({
+        userId: lockedBooking.user_id,
+        bookingId,
+        type: 'deposit_deduct',
+        amount: lockedBooking.deposit_amount,
+        description: '未到场爽约，扣除押金',
+        createdBy: user.userId,
+      });
+    }
+
     await db.run(`
       UPDATE bookings
       SET status = 'no_show', no_show_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [bookingId]);
 
-    await addBookingHistory(bookingId, booking.status, 'no_show', user.userId, user.username, '标记为爽约，押金扣除');
+    await addBookingHistory(bookingId, lockedBooking.status, 'no_show', user.userId, user.username, '标记为爽约，押金扣除');
   });
 
   return await db.get(`

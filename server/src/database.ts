@@ -54,15 +54,44 @@ function serialize(): Promise<void> {
   });
 }
 
+let transactionDepth = 0;
+let savepointCounter = 0;
+
 async function runTransaction<T>(fn: () => Promise<T>): Promise<T> {
-  await run('BEGIN TRANSACTION');
+  const isNested = transactionDepth > 0;
+  const savepointName = isNested ? `sp_${++savepointCounter}` : null;
+
+  transactionDepth++;
+
   try {
+    if (isNested && savepointName) {
+      await run(`SAVEPOINT ${savepointName}`);
+    } else {
+      await run('BEGIN TRANSACTION');
+    }
+
     const result = await fn();
-    await run('COMMIT');
+
+    if (isNested && savepointName) {
+      await run(`RELEASE SAVEPOINT ${savepointName}`);
+    } else {
+      await run('COMMIT');
+    }
+
     return result;
   } catch (err) {
-    await run('ROLLBACK');
+    try {
+      if (isNested && savepointName) {
+        await run(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+      } else {
+        await run('ROLLBACK');
+      }
+    } catch (rollbackErr) {
+      console.error('Rollback error:', rollbackErr);
+    }
     throw err;
+  } finally {
+    transactionDepth--;
   }
 }
 

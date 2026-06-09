@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Layout as AntLayout, Menu, Avatar, Dropdown, Badge, Typography } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   HomeOutlined,
   CalendarOutlined,
@@ -43,7 +44,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const residentItems = [
+  const residentItems: MenuProps['items'] = [
     {
       key: '/',
       icon: <HomeOutlined />,
@@ -66,7 +67,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     },
   ];
 
-  const adminItems = [
+  const adminItems: MenuProps['items'] = [
     {
       key: '/',
       icon: <HomeOutlined />,
@@ -119,7 +120,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     navigate('/login');
   };
 
-  const userMenu = {
+  const userMenu: MenuProps = {
     items: [
       {
         key: '1',
@@ -133,7 +134,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         label: `余额: ¥${user?.balance?.toFixed(2) || '0.00'}`,
         disabled: true,
       },
-      { type: 'divider' },
+      { type: 'divider' as const },
       {
         key: '3',
         icon: <LogoutOutlined />,

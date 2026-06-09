@@ -114,40 +114,58 @@ export async function importVenues(venues: CreateVenueParams[]): Promise<VenueIm
   const existingVenues = await db.all('SELECT code FROM venues');
   const existingCodes = new Set(existingVenues.map((v: any) => v.code));
 
+  const validVenues: { venue: CreateVenueParams; rowNum: number }[] = [];
+
   for (let index = 0; index < venues.length; index++) {
     const venue = venues[index];
     const rowNum = index + 1;
-    try {
-      if (!venue.code || !venue.name) {
-        throw new Error('编号和名称不能为空');
-      }
-      if (venue.capacity < 0) {
-        throw new Error('容量不能为负数');
-      }
-      if (venue.depositAmount < 0) {
-        throw new Error('押金不能为负数');
-      }
-      if (seenCodes.has(venue.code)) {
-        result.duplicates.push(venue.code);
-        throw new Error('CSV内重复编号');
-      }
-      if (existingCodes.has(venue.code)) {
-        result.duplicates.push(venue.code);
-        throw new Error('系统中已存在该编号');
-      }
 
-      seenCodes.add(venue.code);
-      await createVenue(venue);
-      result.success++;
-    } catch (err) {
+    if (!venue.code || !venue.name) {
       result.failed++;
-      result.errors.push({
-        row: rowNum,
-        code: venue.code || '',
-        error: err instanceof Error ? err.message : '未知错误',
-      });
+      result.errors.push({ row: rowNum, code: venue.code || '', error: '编号和名称不能为空' });
+      continue;
     }
+    if (venue.capacity < 0) {
+      result.failed++;
+      result.errors.push({ row: rowNum, code: venue.code, error: '容量不能为负数' });
+      continue;
+    }
+    if (venue.depositAmount < 0) {
+      result.failed++;
+      result.errors.push({ row: rowNum, code: venue.code, error: '押金不能为负数' });
+      continue;
+    }
+    if (seenCodes.has(venue.code)) {
+      result.failed++;
+      result.duplicates.push(venue.code);
+      result.errors.push({ row: rowNum, code: venue.code, error: 'CSV内重复编号，整批拒绝' });
+      continue;
+    }
+    if (existingCodes.has(venue.code)) {
+      result.failed++;
+      result.duplicates.push(venue.code);
+      result.errors.push({ row: rowNum, code: venue.code, error: '系统中已存在该编号，整批拒绝' });
+      continue;
+    }
+
+    seenCodes.add(venue.code);
+    validVenues.push({ venue, rowNum });
   }
+
+  if (result.failed > 0) {
+    return result;
+  }
+
+  await db.runTransaction(async () => {
+    for (const { venue } of validVenues) {
+      const id = uuidv4();
+      await db.run(`
+        INSERT INTO venues (id, code, name, description, capacity, deposit_amount, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+      `, [id, venue.code, venue.name, venue.description || '', venue.capacity, venue.depositAmount]);
+      result.success++;
+    }
+  });
 
   return result;
 }
