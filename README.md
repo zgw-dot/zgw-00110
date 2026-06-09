@@ -210,6 +210,27 @@ npm start
 
 **目的**: 验证改期申请、审批、冲突检测、权限控制全流程
 
+**HTTP 状态码约定**:
+- `200 OK` - 改期申请/审批成功
+- `400 Bad Request` - 参数错误、时间冲突、非法时间范围、状态不允许等校验错误
+- `403 Forbidden` - 越权操作（改期他人预约、无权限审批）
+- `401 Unauthorized` - 未登录或 token 无效
+
+#### 自动化回归测试（推荐）
+
+直接运行 PowerShell 脚本验证状态码：
+
+```powershell
+# 验证4种场景的状态码
+.\test-reschedule-status-codes.ps1
+```
+
+**关键期望结果**:
+1. 本人正常改期 → `200 OK`
+2. 越权改期他人预约 → `403 Forbidden`
+3. 非法时间范围（结束早于开始）→ `400 Bad Request`
+4. 时段冲突 → `400 Bad Request`
+
 #### 子步骤 4.1 - 正常改期流程
 1. 使用居民账号 `zhangsan` 登录（密码: user123）
 2. 创建一个预约，状态为 pending 或 approved

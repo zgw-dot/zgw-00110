@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from '../database';
-import { Booking, JWTPayload, RescheduleRequest, RescheduleRequestWithDetails, RescheduleStatus, Venue } from '../types';
+import { Booking, ForbiddenError, JWTPayload, RescheduleRequest, RescheduleRequestWithDetails, RescheduleStatus, Venue } from '../types';
 import { checkTimeOverlap } from './bookingService';
 import { addBookingHistory } from './auditService';
 
@@ -44,7 +44,7 @@ export async function createReschedule(params: CreateRescheduleParams): Promise<
   }
 
   if (booking.user_id !== user.userId) {
-    throw new Error('只能对自己的预约发起改期');
+    throw new ForbiddenError('只能对自己的预约发起改期');
   }
 
   if (booking.status !== 'pending' && booking.status !== 'approved') {

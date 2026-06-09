@@ -132,3 +132,10 @@ export interface JWTPayload {
   username: string;
   role: UserRole;
 }
+
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}

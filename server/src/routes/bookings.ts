@@ -26,7 +26,7 @@ import {
   getRescheduleById,
   getPendingRescheduleCount,
 } from '../services/rescheduleService';
-import { BookingStatus, RescheduleStatus } from '../types';
+import { BookingStatus, ForbiddenError, RescheduleStatus } from '../types';
 
 const router = express.Router();
 
@@ -110,7 +110,11 @@ router.post('/:id/reschedule', authenticate, requireRole('resident'), async (req
 
     res.json(reschedule);
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : '改期申请失败' });
+    if (err instanceof ForbiddenError) {
+      res.status(403).json({ error: err.message });
+    } else {
+      res.status(400).json({ error: err instanceof Error ? err.message : '改期申请失败' });
+    }
   }
 });
 

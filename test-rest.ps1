@@ -477,10 +477,12 @@ try {
     Write-Host "  FAIL: Should have failed but succeeded" -ForegroundColor Red
     exit 1
 } catch {
-    if ($_.Exception.Message -match "403|Forbidden|只能|自己") {
-        Write-Host "  OK: Correctly rejected with 403: $($_.Exception.Message.Substring(0,50))..." -ForegroundColor Green
+    $statusCode = $_.Exception.Response.StatusCode.value__
+    if ($statusCode -eq 403) {
+        Write-Host "  OK: Correctly rejected with HTTP 403 Forbidden" -ForegroundColor Green
     } else {
-        Write-Host "  WARN: Rejected but wrong message: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  FAIL: Expected 403 but got $statusCode : $($_.Exception.Message.Substring(0,50))..." -ForegroundColor Red
+        exit 1
     }
 }
 
