@@ -218,18 +218,37 @@ npm start
 
 #### 自动化回归测试（推荐）
 
-直接运行 PowerShell 脚本验证状态码：
+直接运行 PowerShell 脚本验证状态码，**无需清理数据库，可连续多次运行**：
 
 ```powershell
 # 验证4种场景的状态码
 .\test-reschedule-status-codes.ps1
 ```
 
-**关键期望结果**:
-1. 本人正常改期 → `200 OK`
-2. 越权改期他人预约 → `403 Forbidden`
-3. 非法时间范围（结束早于开始）→ `400 Bad Request`
-4. 时段冲突 → `400 Bad Request`
+**脚本特性**:
+- 自动调用日历 API 查找未来30天内的可用时段
+- 使用时间戳作为 `purpose` 前缀隔离测试数据
+- 任一前置步骤失败立即中止，不会发送空 ID 请求
+- 动态日期偏移（基于运行 ID）避免与历史测试数据冲突
+
+**关键期望结果**（固定不变，可用于回归）:
+| 场景 | HTTP 状态码 | 说明 |
+|------|------------|------|
+| 本人正常改期 | `200 OK` | 改期申请创建成功 |
+| 越权改期他人预约 | `403 Forbidden` | 非本人预约禁止改期 |
+| 非法时间范围（结束早于开始） | `400 Bad Request` | 参数校验失败 |
+| 时段冲突 | `400 Bad Request` | 业务规则校验失败 |
+
+**稳定性验证**:
+```powershell
+# 连续运行两次，验证稳定性
+for ($i = 1; $i -le 2; $i++) {
+    Write-Host "--- Run $i ---"
+    .\test-reschedule-status-codes.ps1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL" -ForegroundColor Red; break }
+    Write-Host "PASS" -ForegroundColor Green
+}
+```
 
 #### 子步骤 4.1 - 正常改期流程
 1. 使用居民账号 `zhangsan` 登录（密码: user123）
