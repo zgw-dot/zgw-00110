@@ -203,6 +203,9 @@ export const bookingApi = {
 
   rejectReschedule: (id: string, reason: string) =>
     api.post<RescheduleRequest>(`/bookings/reschedules/${id}/reject`, { reason }).then((r) => r.data),
+
+  withdrawReschedule: (id: string, reason?: string) =>
+    api.post<RescheduleRequest>(`/bookings/reschedules/${id}/withdraw`, { reason }).then((r) => r.data),
 };
 
 export const transactionApi = {

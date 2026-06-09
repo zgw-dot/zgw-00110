@@ -19,6 +19,12 @@ export interface HandleRescheduleParams {
   user: JWTPayload;
 }
 
+export interface WithdrawRescheduleParams {
+  rescheduleId: string;
+  withdrawReason?: string;
+  user: JWTPayload;
+}
+
 function parseTimeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number);
   return hours * 60 + minutes;
@@ -175,6 +181,67 @@ export async function rejectReschedule(params: HandleRescheduleParams): Promise<
         rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `, [user.userId, user.username, rejectionReason || '管理员拒绝', rescheduleId]);
+
+  return await db.get(`
+    SELECT r.*, v.name as venue_name, v.code as venue_code, u.name as user_name, u.username as user_username
+    FROM reschedule_requests r
+    LEFT JOIN bookings b ON r.booking_id = b.id
+    LEFT JOIN venues v ON b.venue_id = v.id
+    LEFT JOIN users u ON r.user_id = u.id
+    WHERE r.id = ?
+  `, [rescheduleId]) as RescheduleRequestWithDetails;
+}
+
+export async function withdrawReschedule(params: WithdrawRescheduleParams): Promise<RescheduleRequestWithDetails> {
+  const { rescheduleId, withdrawReason, user } = params;
+
+  const reschedule = await db.get('SELECT * FROM reschedule_requests WHERE id = ?', [rescheduleId]) as RescheduleRequest | undefined;
+  if (!reschedule) {
+    throw new Error('改期申请不存在');
+  }
+
+  if (reschedule.user_id !== user.userId) {
+    throw new ForbiddenError('只能撤回自己的改期申请');
+  }
+
+  if (reschedule.status === 'withdrawn') {
+    throw new Error('该改期申请已被撤回，请勿重复操作');
+  }
+
+  if (reschedule.status === 'approved') {
+    throw new Error('该改期申请已通过审批，无法撤回');
+  }
+
+  if (reschedule.status === 'rejected') {
+    throw new Error('该改期申请已被拒绝，无法撤回');
+  }
+
+  if (reschedule.status !== 'pending') {
+    throw new Error('该改期申请已被处理，无法撤回');
+  }
+
+  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [reschedule.booking_id]) as Booking | undefined;
+  if (!booking) {
+    throw new Error('关联预约不存在');
+  }
+
+  await db.runTransaction(async () => {
+    await db.run(`
+      UPDATE reschedule_requests
+      SET status = 'withdrawn', handled_by = ?, handled_by_name = ?, handled_at = CURRENT_TIMESTAMP,
+          withdraw_reason = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [user.userId, user.username, withdrawReason || '用户撤回', rescheduleId]);
+
+    await addBookingHistory(
+      reschedule.booking_id,
+      booking.status,
+      booking.status,
+      user.userId,
+      user.username,
+      `撤回改期申请: ${reschedule.old_date} ${reschedule.old_start_time}-${reschedule.old_end_time} → ${reschedule.new_date} ${reschedule.new_start_time}-${reschedule.new_end_time}，撤回原因: ${withdrawReason || '用户撤回'}`
+    );
+  });
 
   return await db.get(`
     SELECT r.*, v.name as venue_name, v.code as venue_code, u.name as user_name, u.username as user_username

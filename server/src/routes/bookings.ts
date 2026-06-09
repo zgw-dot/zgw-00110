@@ -22,6 +22,7 @@ import {
   createReschedule,
   approveReschedule,
   rejectReschedule,
+  withdrawReschedule,
   getRescheduleRequests,
   getRescheduleById,
   getPendingRescheduleCount,
@@ -163,6 +164,35 @@ router.post('/reschedules/:id/reject', authenticate, requireRole('admin'), async
     res.json(reschedule);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : '拒绝改期失败' });
+  }
+});
+
+router.post('/reschedules/:id/withdraw', authenticate, requireRole('resident'), async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '未认证' });
+    const { reason } = req.body;
+
+    const reschedule = await withdrawReschedule({
+      rescheduleId: req.params.id,
+      withdrawReason: reason,
+      user: req.user,
+    });
+
+    await logAudit(
+      req.user,
+      'reschedule_withdraw',
+      reschedule.booking_id,
+      `撤回改期申请: ${reschedule.old_date} ${reschedule.old_start_time}-${reschedule.old_end_time} → ${reschedule.new_date} ${reschedule.new_start_time}-${reschedule.new_end_time}, 撤回原因: ${reason || '用户撤回'}`,
+      req.ip
+    );
+
+    res.json(reschedule);
+  } catch (err) {
+    if (err instanceof ForbiddenError) {
+      res.status(403).json({ error: err.message });
+    } else {
+      res.status(400).json({ error: err instanceof Error ? err.message : '撤回改期失败' });
+    }
   }
 });
 

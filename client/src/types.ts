@@ -105,7 +105,8 @@ export interface BookingHistory {
 export type RescheduleStatus =
   | 'pending'
   | 'approved'
-  | 'rejected';
+  | 'rejected'
+  | 'withdrawn';
 
 export interface RescheduleRequest {
   id: string;
@@ -123,6 +124,7 @@ export interface RescheduleRequest {
   handled_by_name: string | null;
   handled_at: string | null;
   rejection_reason: string | null;
+  withdraw_reason: string | null;
   created_at: string;
   updated_at: string;
   venue_name?: string;
@@ -135,12 +137,14 @@ export const RESCHEDULE_STATUS_TEXT: Record<RescheduleStatus, string> = {
   pending: '待处理',
   approved: '已同意',
   rejected: '已拒绝',
+  withdrawn: '已撤回',
 };
 
 export const RESCHEDULE_STATUS_COLOR: Record<RescheduleStatus, string> = {
   pending: 'orange',
   approved: 'green',
   rejected: 'red',
+  withdrawn: 'default',
 };
 
 export interface LoginResponse {

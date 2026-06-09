@@ -17,6 +17,7 @@
 - 查看预约状态和历史记录
 - 取消待审批的预约
 - **申请改期**：对 pending 或 approved 状态的预约提交改期申请，填写新时间和原因
+- **撤回改期申请**：对仍待处理的改期申请进行撤回，原预约时间保持不变
 - 查看改期申请状态和处理结果
 - 查看个人押金账本和余额变化明细
 
@@ -37,6 +38,8 @@
 - **改期申请**: 居民可对 pending 或 approved 预约发起改期，管理员审批后生效
   - 完整冲突校验：时段冲突、已停用场地、时间范围合法性
   - 改期历史记录，状态变更可追溯
+  - 居民可撤回自己名下仍待处理的改期申请，原预约时间保持不变
+  - 撤回不检查目标时段冲突，仅更新改期状态为 withdrawn
 - **核销语义说明**:
   - 核销 = 确认正常使用完成，押金作为保证金退还
   - 爽约 = 未到场，押金作为违约金扣除
@@ -223,6 +226,31 @@ npm start
 ```powershell
 # 验证4种场景的状态码
 .\test-reschedule-status-codes.ps1
+
+# 验证撤回功能的6种场景
+.\test-reschedule-withdraw.ps1
+```
+
+##### 撤回功能测试关键期望结果：
+
+| 场景 | HTTP 状态码 | 说明 |
+|------|------------|------|
+| 本人成功撤回待处理改期 | `200 OK` | 状态变为 withdrawn，原预约时间保持不变，待处理数量减1 |
+| 重复撤回已撤回的改期 | `400 Bad Request` | 提示"该改期申请已被撤回，请勿重复操作" |
+| 其他居民越权撤回 | `403 Forbidden` | 提示"只能撤回自己的改期申请" |
+| 管理员越权撤回 | `403 Forbidden` | 提示"权限不足" |
+| 撤回已批准的改期 | `400 Bad Request` | 提示"该改期申请已通过审批，无法撤回" |
+| 撤回已拒绝的改期 | `400 Bad Request` | 提示"该改期申请已被拒绝，无法撤回" |
+
+**稳定性验证**：
+```powershell
+# 连续运行两次，验证稳定性
+for ($i = 1; $i -le 2; $i++) {
+    Write-Host "--- Run $i ---"
+    .\test-reschedule-withdraw.ps1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL" -ForegroundColor Red; break }
+    Write-Host "PASS" -ForegroundColor Green
+}
 ```
 
 **脚本特性**:
@@ -307,12 +335,45 @@ for ($i = 1; $i -le 2; $i++) {
 6. 居民可以在「我的改期」中查看拒绝原因
 7. 审计日志中有 `reschedule_reject` 记录
 
+#### 子步骤 4.6 - 撤回改期申请测试
+
+**目的**: 验证用户可以撤回自己名下且仍待处理的改期申请
+
+**操作步骤**:
+1. 使用居民账号 `zhangsan` 登录（密码: user123）
+2. 创建一个预约并通过审批（状态为 approved）
+3. 在「我的预约」中点击「改期」，提交改期申请
+4. 进入「预约管理」-「我的改期」标签页
+5. 看到刚刚提交的待处理改期申请，操作栏显示「撤回」按钮
+6. 点击「撤回」按钮，弹出确认窗口
+7. 填写撤回原因，点击「确认撤回」
+8. 改期状态变为「已撤回」，原预约时间保持不变
+9. 首页「待处理事项」的待处理改期数量减1
+10. 查看预约详情的「状态流转历史」，确认有撤回改期的记录
+11. 查看「审计日志」，确认有 `reschedule_withdraw` 记录
+12. 尝试对已撤回的改期再次点击撤回（按钮应不显示或提示错误）
+
+**权限校验测试**:
+1. 居民 `lisi` 登录，在「我的改期」中看不到 `zhangsan` 的改期申请
+2. 管理员登录，在「改期申请」中看不到「撤回」按钮
+3. 使用管理员 token 调用撤回 API，应返回 403 Forbidden
+
+**预期结果**:
+- 撤回按钮只显示给改期申请人，且仅在 pending 状态时可见
+- 撤回后改期状态变为 withdrawn，原预约时间不变
+- 待处理改期数量、改期列表、预约详情立即刷新
+- 重复撤回、已批准、已拒绝的改期都返回明确的错误信息
+- 撤回不检查目标时段冲突（因为不修改原预约时间）
+- 预约历史和审计日志都能看到操作者、原时间、目标时间和撤回原因
+- 服务重启后，withdrawn 状态和所有记录保持正确
+
 **预期结果**:
 - 正常改期流程完整可用，时间正确更新
 - 所有冲突场景都能正确拦截，不创建无效改期
 - 越权操作返回 403，数据安全有保障
 - 重启后所有改期数据、历史记录、审计日志保持完整
 - 拒绝改期后原预约不变，拒绝原因可查
+- 撤回改期功能完整可用，权限控制严格
 
 ## CSV 导入导出说明
 
@@ -410,6 +471,7 @@ zgw-00110/
 - `POST /api/bookings/:id/reschedule` - 提交改期申请（居民）
 - `POST /api/bookings/reschedules/:id/approve` - 同意改期（管理员）
 - `POST /api/bookings/reschedules/:id/reject` - 拒绝改期（管理员）
+- `POST /api/bookings/reschedules/:id/withdraw` - 撤回改期申请（居民本人，仅待处理状态）
 
 ### 交易接口
 - `GET /api/transactions` - 获取本人交易记录
@@ -442,8 +504,8 @@ zgw-00110/
 ### reschedule_requests
 - id, booking_id, user_id, old_date, old_start_time, old_end_time
 - new_date, new_start_time, new_end_time, reason
-- status (pending/approved/rejected), handled_by, handled_by_name, handled_at
-- rejection_reason, created_at, updated_at
+- status (pending/approved/rejected/withdrawn), handled_by, handled_by_name, handled_at
+- rejection_reason, withdraw_reason, created_at, updated_at
 
 ## 安全设计
 

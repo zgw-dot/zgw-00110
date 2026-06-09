@@ -197,11 +197,12 @@ export async function initDatabase() {
       new_start_time TEXT NOT NULL,
       new_end_time TEXT NOT NULL,
       reason TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','withdrawn')),
       handled_by TEXT,
       handled_by_name TEXT,
       handled_at TEXT,
       rejection_reason TEXT,
+      withdraw_reason TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (booking_id) REFERENCES bookings(id),
@@ -218,6 +219,56 @@ export async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_reschedule_user ON reschedule_requests(user_id);
     CREATE INDEX IF NOT EXISTS idx_reschedule_status ON reschedule_requests(status);
   `);
+
+  const existingTable = await get("SELECT sql FROM sqlite_master WHERE type='table' AND name='reschedule_requests'");
+  if (existingTable && existingTable.sql) {
+    if (!existingTable.sql.includes("'withdrawn'")) {
+      await runTransaction(async () => {
+        await exec(`
+          CREATE TABLE IF NOT EXISTS reschedule_requests_new (
+            id TEXT PRIMARY KEY,
+            booking_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            old_date TEXT NOT NULL,
+            old_start_time TEXT NOT NULL,
+            old_end_time TEXT NOT NULL,
+            new_date TEXT NOT NULL,
+            new_start_time TEXT NOT NULL,
+            new_end_time TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','withdrawn')),
+            handled_by TEXT,
+            handled_by_name TEXT,
+            handled_at TEXT,
+            rejection_reason TEXT,
+            withdraw_reason TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (booking_id) REFERENCES bookings(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+          );
+        `);
+        await exec(`
+          INSERT INTO reschedule_requests_new 
+          SELECT id, booking_id, user_id, old_date, old_start_time, old_end_time, 
+                 new_date, new_start_time, new_end_time, reason, status, 
+                 handled_by, handled_by_name, handled_at, rejection_reason, 
+                 NULL as withdraw_reason, created_at, updated_at
+          FROM reschedule_requests;
+        `);
+        await exec(`DROP TABLE reschedule_requests;`);
+        await exec(`ALTER TABLE reschedule_requests_new RENAME TO reschedule_requests;`);
+      });
+      console.log('[Migration] reschedule_requests 表已升级，支持 withdrawn 状态');
+    }
+
+    const columns = await all("PRAGMA table_info(reschedule_requests)") as any[];
+    const hasColumn = columns.some((col: any) => col.name === 'withdraw_reason');
+    if (!hasColumn) {
+      await exec(`ALTER TABLE reschedule_requests ADD COLUMN withdraw_reason TEXT;`);
+      console.log('[Migration] 已添加 withdraw_reason 列');
+    }
+  }
 }
 
 export default {

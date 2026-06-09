@@ -98,7 +98,8 @@ export interface BookingHistory {
 export type RescheduleStatus =
   | 'pending'
   | 'approved'
-  | 'rejected';
+  | 'rejected'
+  | 'withdrawn';
 
 export interface RescheduleRequest {
   id: string;
@@ -116,6 +117,7 @@ export interface RescheduleRequest {
   handled_by_name: string | null;
   handled_at: string | null;
   rejection_reason: string | null;
+  withdraw_reason: string | null;
   created_at: string;
   updated_at: string;
 }

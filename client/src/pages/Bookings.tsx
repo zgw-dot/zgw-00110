@@ -20,6 +20,7 @@ import {
   Card,
   Row,
   Col,
+  Alert,
 } from 'antd';
 import {
   CheckOutlined,
@@ -34,6 +35,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   SwapOutlined,
+  RollbackOutlined,
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { useAuth } from '../contexts/AuthContext';
@@ -74,8 +76,10 @@ export default function Bookings() {
   const [cancelModalVisible, setCancelModalVisible] = useState(false);
   const [rescheduleModalVisible, setRescheduleModalVisible] = useState(false);
   const [rescheduleRejectModalVisible, setRescheduleRejectModalVisible] = useState(false);
+  const [rescheduleWithdrawModalVisible, setRescheduleWithdrawModalVisible] = useState(false);
   const [rescheduleForm] = Form.useForm();
   const [rescheduleRejectForm] = Form.useForm();
+  const [rescheduleWithdrawForm] = Form.useForm();
   const [rejectForm] = Form.useForm();
   const [cancelForm] = Form.useForm();
   const [reschedules, setReschedules] = useState<RescheduleRequest[]>([]);
@@ -269,6 +273,21 @@ export default function Bookings() {
       loadReschedules();
     } catch (err: any) {
       message.error(err.response?.data?.error || '拒绝改期失败');
+    }
+  };
+
+  const handleWithdrawReschedule = async (values: any) => {
+    if (!selectedReschedule) return;
+    try {
+      await bookingApi.withdrawReschedule(selectedReschedule.id, values.reason);
+      message.success('改期申请已撤回');
+      setRescheduleWithdrawModalVisible(false);
+      rescheduleWithdrawForm.resetFields();
+      loadReschedules();
+      loadBookings();
+      refreshUser();
+    } catch (err: any) {
+      message.error(err.response?.data?.error || '撤回改期失败');
     }
   };
 
@@ -579,6 +598,22 @@ export default function Bookings() {
             </Button>
           );
         }
+        if (user?.role === 'resident' && record.user_id === user?.id && record.status === 'pending') {
+          actions.push(
+            <Button
+              key="withdraw"
+              type="link"
+              danger
+              icon={<RollbackOutlined />}
+              onClick={() => {
+                setSelectedReschedule(record);
+                setRescheduleWithdrawModalVisible(true);
+              }}
+            >
+              撤回
+            </Button>
+          );
+        }
         if (record.rejection_reason) {
           actions.push(
             <Button
@@ -587,6 +622,17 @@ export default function Bookings() {
               onClick={() => message.info(`拒绝原因: ${record.rejection_reason}`)}
             >
               查看拒绝原因
+            </Button>
+          );
+        }
+        if (record.withdraw_reason) {
+          actions.push(
+            <Button
+              key="view-withdraw-reason"
+              type="link"
+              onClick={() => message.info(`撤回原因: ${record.withdraw_reason}`)}
+            >
+              查看撤回原因
             </Button>
           );
         }
@@ -912,6 +958,54 @@ export default function Bookings() {
               <Button onClick={() => setRescheduleRejectModalVisible(false)}>取消</Button>
               <Button type="primary" htmlType="submit" danger>
                 确认拒绝
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="撤回改期申请"
+        open={rescheduleWithdrawModalVisible}
+        onCancel={() => setRescheduleWithdrawModalVisible(false)}
+        footer={null}
+      >
+        {selectedReschedule && (
+          <div style={{ marginBottom: 16 }}>
+            <Card size="small" title="改期信息">
+              <Descriptions column={1} size="small">
+                <Descriptions.Item label="场地">
+                  {selectedReschedule.venue_name}
+                </Descriptions.Item>
+                <Descriptions.Item label="原时间">
+                  {selectedReschedule.old_date} {selectedReschedule.old_start_time} - {selectedReschedule.old_end_time}
+                </Descriptions.Item>
+                <Descriptions.Item label="新时间">
+                  {selectedReschedule.new_date} {selectedReschedule.new_start_time} - {selectedReschedule.new_end_time}
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+            <Alert
+              message="撤回后原预约时间保持不变，此操作不可撤销"
+              type="warning"
+              showIcon
+              style={{ marginTop: 12 }}
+            />
+          </div>
+        )}
+        <Form form={rescheduleWithdrawForm} layout="vertical" onFinish={handleWithdrawReschedule}>
+          <Form.Item
+            name="reason"
+            label="撤回原因"
+            rules={[{ required: true, message: '请输入撤回原因' }]}
+          >
+            <TextArea rows={4} placeholder="请详细说明撤回原因" />
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button onClick={() => setRescheduleWithdrawModalVisible(false)}>取消</Button>
+              <Button type="primary" htmlType="submit" danger>
+                确认撤回
               </Button>
             </Space>
           </Form.Item>
